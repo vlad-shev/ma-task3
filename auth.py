@@ -38,5 +38,5 @@ def oauth2callback():
 
 
 if __name__ == '__main__':
-    bot.polling()
-    app.run()
+    bot.polling()  # kill bot.polling() (Ctrl + C) after getting link in Telegram to start app.run()
+    app.run()      # with webhook it must work correctly

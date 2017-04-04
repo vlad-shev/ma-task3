@@ -1,17 +1,20 @@
 import httplib2
-import json
 import telebot   # pyTelegramBotAPI==2.3.1
 
-from oauth2client.client import flow_from_clientsecrets  # google-api-python-client==1.6.2
-from googleapiclient.discovery import build              #
+from oauth2client.client import flow_from_clientsecrets, Credentials  # google-api-python-client==1.6.2
+from googleapiclient.discovery import build
 
 from config import TOKEN, CLIENT_SECRETS_FILE, REDIRECT_URI, API_VERSION
 from flask import Flask, request
 
 app = Flask(__name__)
 bot = telebot.TeleBot(TOKEN)
-services = {}
 
+# TODO
+# 1.Get user_id from Telegram
+# 2 If token for user_id in db get token from db
+#  3.1 Else make request to google and get token for user_id
+#  3.2 Save token in db for user_id
 
 @bot.message_handler(commands=['Drive'])  # Login in GoogleDrive
 def drive_auth(message):
@@ -32,11 +35,10 @@ def drive_auth(message):
     # Make url button to Google authorization server
 
     @app.route('/oauth2callback', methods=['GET'])  # Google server redirect user on this page and
-    def build_drive():                            # app get code which will exchange for access token.
+    def get_credentials():                            # app get code which will exchange for access token.
         credentials = flow.step2_exchange(request.args.get('code'))  # Exchange authorization code for access token
-        http = credentials.authorize(httplib2.Http())  # Apply the access token to an Http object
-        service_name = 'drive'
-        services['drive'] = build(service_name, API_VERSION, http=http)  # Build a service object
+        # Create json credentials object using Credentials.to_json(credentials)
+        # Add credentials to database
         return '200'
 
 
@@ -54,20 +56,25 @@ def calendar_auth(message):
     bot.send_message(message.chat.id, 'Google Calendar', reply_markup=keyboard)
 
     @app.route('/oauth2callback', methods=['GET'])
-    def build_calendar():
+    def get_credentials():
         credentials = flow.step2_exchange(request.args.get('code'))
-        http = credentials.authorize(httplib2.Http())
-        service_name = 'calendar'
-        services['calendar'] = build(service_name, API_VERSION, http=http)
+        print(Credentials.to_json(credentials))
         return '200'
 
 
+def build_service(credentials, service_name):
+    http = credentials.authorize(httplib2.Http())  # Apply the access token to an Http object
+    service = build(service_name, API_VERSION, http=http)  # Build a service object
+    return service
+
+"""
 @app.route('/test/drive')
 def test_drive():
-    drive = services['drive']
+    drive = build_service()
     files = drive.files().list().execute()  # List all files in GDrive
     return json.dumps(files)
+"""
 
 if __name__ == '__main__':
     bot.polling()  # kill bot.polling() (Ctrl + C) after getting link in Telegram to start app.run()
-    app.run()      # with webhook it must work correctly
+    app.run()      # using webhook it must work correctly

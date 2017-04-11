@@ -7,6 +7,7 @@ from googleapiclient.discovery import build
 from config import TOKEN, CLIENT_SECRETS_FILE, REDIRECT_URI, API_VERSION
 from flask import Flask, request
 from models.user import User
+
 app = Flask(__name__)
 bot = telebot.TeleBot(TOKEN)
 
@@ -20,25 +21,58 @@ flow = flow_from_clientsecrets(CLIENT_SECRETS_FILE,
 #  and applying access tokens to HTTP requests.
 
 
-@bot.message_handler(commands=['login'])  # Login in GoogleDrive
+@bot.message_handler(commands=['login'])  # Save user and take his google token
 def request_contact(message):
     msg = bot.send_message(message.chat.id, text='Please send your phone')
-    bot.register_next_step_handler(msg, get_contact)
+    bot.register_next_step_handler(msg, check_phone)
+
+
+def check_phone(message):
+    phone = message.text
+    if phone.isdigit() and (len(phone) == 12 or len(phone) == 10):
+        get_contact(message)
+    else:
+        msg = bot.send_message(message.chat.id, text='Please send correct phone number')
+        bot.register_next_step_handler(msg, check_phone)
 
 
 def get_contact(message):
     user_dict['user_id'] = int(message.from_user.id)
     user_dict['username'] = message.from_user.first_name
+
     user_dict['phone'] = int(message.text)
     msg = bot.send_message(message.chat.id, text='Please send your email')
-    bot.register_next_step_handler(msg, get_email)
+    bot.register_next_step_handler(msg, check_email)
+
+
+def check_email(message):
+    email = message.text
+    if '@' in email:
+        get_email(message)
+    else:
+        msg = bot.send_message(message.chat.id, text='Please send correct email')
+        bot.register_next_step_handler(msg, check_email)
 
 
 def get_email(message):
     user_dict['email'] = message.text
-    bot.send_message(message.chat.id, 'Hi, {} {}'.format(user_dict['username'], user_dict['email']))
+    bot.send_message(message.chat.id, 'Hi, {}'.format(user_dict['username']))
+    keyboard = telebot.types.ReplyKeyboardMarkup(one_time_keyboard=True)
+    keyboard.row('Agree', 'Disagree')
+    msg = bot.send_message(message.chat.id, text='To use this bot you should share access to your google account',
+                           reply_markup=keyboard)
+    bot.register_next_step_handler(msg, check_google)
 
-    bot.send_message(message.chat.id, text='Please sign in to Google account')
+
+def check_google(message):
+    answer = message.text
+    if answer == 'Agree':
+        auth_google(message)
+    else:
+        bot.send_message(message.chat.id, text='Without access to google this bot have no sense')
+
+
+def auth_google(message):
     auth_url = flow.step1_get_authorize_url()  # Get url to Google authorization server
     keyboard = telebot.types.InlineKeyboardMarkup()
     url_button = telebot.types.InlineKeyboardButton(text='Google authentication',
@@ -57,8 +91,8 @@ def get_credentials():                            # app get code which will exch
     user_dict['google_token'] = json_credentials
     user = User(user_id=user_dict['user_id'], username=user_dict['username'], email=user_dict['email'],
                 phone=user_dict['phone'], google_token=user_dict['google_token'])
-    #session.add(user)
-    #sesion.commit()
+    # session.add(user)
+    # sesion.commit()
     # Add user to database
     return '200'
 

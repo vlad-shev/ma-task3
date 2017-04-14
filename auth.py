@@ -1,15 +1,25 @@
 import httplib2
 import telebot   # pyTelegramBotAPI==2.3.1
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.declarative import declarative_base
+from models.user import User
+
 from oauth2client.client import flow_from_clientsecrets, Credentials  # google-api-python-client==1.6.2
 from googleapiclient.discovery import build
 
 from config import TOKEN, CLIENT_SECRETS_FILE, REDIRECT_URI, API_VERSION
 from flask import Flask, request
-from models.user import User
 
 app = Flask(__name__)
 bot = telebot.TeleBot(TOKEN)
+
+engine = create_engine('')
+Base = declarative_base()
+DBSession = sessionmaker(bind=engine)
+session = DBSession()
+
 
 user_dict = {}
 scope = 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/calendar'
@@ -22,6 +32,17 @@ flow = flow_from_clientsecrets(CLIENT_SECRETS_FILE,
 
 
 @bot.message_handler(commands=['login'])  # Save user and take his google token
+def find_user(message):
+    current_id = message.from_user.id
+    for user in session.query(User).order_by(User.id):
+        if user.id == current_id:
+            bot.send_message(message.chat.id, text='Hi,{}. You have already logged in'.format(user.username))
+    else:
+        bot.send_message(message.chat.id,
+                         text='Hi,{}. We need some information to contact you'.format(message.from_user.first_name))
+        request_contact(message)
+
+
 def request_contact(message):
     msg = bot.send_message(message.chat.id, text='Please send your phone')
     bot.register_next_step_handler(msg, check_phone)
@@ -37,7 +58,7 @@ def check_phone(message):
 
 
 def get_contact(message):
-    user_dict['user_id'] = int(message.from_user.id)
+    user_dict['telegram_id'] = int(message.from_user.id)
     user_dict['username'] = message.from_user.first_name
 
     user_dict['phone'] = int(message.text)
@@ -89,11 +110,10 @@ def get_credentials():                            # app get code which will exch
     # Create json credentials object using Credentials.to_json(credentials)
     json_credentials = Credentials.to_json(credentials)
     user_dict['google_token'] = json_credentials
-    user = User(user_id=user_dict['user_id'], username=user_dict['username'], email=user_dict['email'],
+    user = User(user_id=user_dict['telegram_id_id'], username=user_dict['username'], email=user_dict['email'],
                 phone=user_dict['phone'], google_token=user_dict['google_token'])
-    # session.add(user)
-    # sesion.commit()
-    # Add user to database
+    session.add(user)
+    session.commit()
     return '200'
 
 

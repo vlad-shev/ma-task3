@@ -107,9 +107,8 @@ def auth_google(message):
 @app.route('/oauth2callback', methods=['GET'])  # Google server redirect user on this page and
 def get_credentials():                            # app get code which will exchange for access token.
     credentials = flow.step2_exchange(request.args.get('code'))  # Exchange authorization code for access token
-    # Create json credentials object using Credentials.to_json(credentials)
-    json_credentials = Credentials.to_json(credentials)
-    user_dict['google_token'] = json_credentials
+    http = credentials.authorize(httplib2.Http())  # <==== THIS IS OUR TOKEN !!!!!!!!! SAVE IT!
+    user_dict['google_token'] = http
     user = User(user_id=user_dict['telegram_id_id'], username=user_dict['username'], email=user_dict['email'],
                 phone=user_dict['phone'], google_token=user_dict['google_token'])
     session.add(user)
@@ -117,18 +116,13 @@ def get_credentials():                            # app get code which will exch
     return '200'
 
 
-def build_service(credentials, service_name):
-    http = credentials.authorize(httplib2.Http())  # Apply the access token to an Http object
+def build_service(service_name):
+    # Get http as an argument
+    # OR
+    # http = user_dict['google_token']
     service = build(service_name, API_VERSION, http=http)  # Build a service object
     return service
 
-"""
-@app.route('/test/drive')
-def test_drive():
-    drive = build_service()
-    files = drive.files().list().execute()  # List all files in GDrive
-    return json.dumps(files)
-"""
 
 if __name__ == '__main__':
     bot.polling()  # kill bot.polling() (Ctrl + C) after getting link in Telegram to start app.run()

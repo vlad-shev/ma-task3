@@ -6,7 +6,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from models.user import User
 
-from oauth2client.client import flow_from_clientsecrets, Credentials  # google-api-python-client==1.6.2
+from oauth2client.client import flow_from_clientsecrets, OAuth2Credentials  # google-api-python-client==1.6.2
 from googleapiclient.discovery import build
 
 from config import TOKEN, CLIENT_SECRETS_FILE, REDIRECT_URI, API_VERSION
@@ -20,7 +20,7 @@ Base = declarative_base()
 DBSession = sessionmaker(bind=engine)
 session = DBSession()
 
-
+a = {}
 user_dict = {}
 scope = 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/calendar'
 # OAuth scope that need to request to access Google APIs
@@ -105,21 +105,20 @@ def auth_google(message):
 
 
 @app.route('/oauth2callback', methods=['GET'])  # Google server redirect user on this page and
-def get_credentials():                            # app get code which will exchange for access token.
-    credentials = flow.step2_exchange(request.args.get('code'))  # Exchange authorization code for access token
-    http = credentials.authorize(httplib2.Http())  # <==== THIS IS OUR TOKEN !!!!!!!!! SAVE IT!
-    user_dict['google_token'] = http
-    user = User(user_id=user_dict['telegram_id_id'], username=user_dict['username'], email=user_dict['email'],
-                phone=user_dict['phone'], google_token=user_dict['google_token'])
-    session.add(user)
-    session.commit()
-    return '200'
+def get_credentials():                            # app get code which will exchange for access token
+    if 'code' not in request.args:
+        response = "Didn't get the auth code"
+    else:
+        auth_code = request.args.get('code')  # Exchange authorization code for access token
+        credentials = flow.step2_exchange(auth_code)
+        a['credentials_json'] = OAuth2Credentials.to_json(credentials)
+        response = 'We get your token'
+    return response
 
 
-def build_service(service_name):
-    # Get http as an argument
-    # OR
-    # http = user_dict['google_token']
+def build_service(credentials_json, service_name):
+    credentials = OAuth2Credentials.from_json(credentials_json)
+    http = credentials.authorize(httplib2.Http())
     service = build(service_name, API_VERSION, http=http)  # Build a service object
     return service
 

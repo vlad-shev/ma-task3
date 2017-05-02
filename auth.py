@@ -1,46 +1,39 @@
 import httplib2
 import telebot   # pyTelegramBotAPI==2.3.1
-
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.ext.declarative import declarative_base
-from models.user import User
-
+from sqlalchemy.orm import scoped_session, sessionmaker
 from oauth2client.client import flow_from_clientsecrets, OAuth2Credentials  # google-api-python-client==1.6.2
 from googleapiclient.discovery import build
-
 from config import TOKEN, CLIENT_SECRETS_FILE, REDIRECT_URI, API_VERSION
 from flask import Flask, request
+from models import engine, Users
+session = scoped_session(sessionmaker(bind=engine))
 
 app = Flask(__name__)
 bot = telebot.TeleBot(TOKEN)
 
-engine = create_engine('')
-Base = declarative_base()
-DBSession = sessionmaker(bind=engine)
-session = DBSession()
-
 a = {}
 user_dict = {}
-scope = 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/calendar'
+
+scope = 'https://www.googleapis.com/auth/drive'
 # OAuth scope that need to request to access Google APIs
 flow = flow_from_clientsecrets(CLIENT_SECRETS_FILE,
                                scope=scope,
                                redirect_uri=REDIRECT_URI)  # Make app client object.
+flow.params['prompt'] = 'consent'
+flow.params['access_type'] = 'offline'
 # Application uses the client object to perform OAuth 2.0 operations, such as generating authorization request URLs
 #  and applying access tokens to HTTP requests.
 
 
 @bot.message_handler(commands=['login'])  # Save user and take his google token
 def find_user(message):
-    current_id = message.from_user.id
-    for user in session.query(User).order_by(User.id):
-        if user.id == current_id:
-            bot.send_message(message.chat.id, text='Hi,{}. You have already logged in'.format(user.username))
-    else:
-        bot.send_message(message.chat.id,
-                         text='Hi,{}. We need some information to contact you'.format(message.from_user.first_name))
-        request_contact(message)
+    for user in session.query(Users):
+        if user.username == message.from_user.first_name:  # !IMPORTANT! change this code for checking telegram id
+            bot.send_message(message.chat.id, text='You have already logged in'.format(user.username))
+        else:
+            bot.send_message(message.chat.id,
+                             text='Hi,{}. We need some information to contact you'.format(message.from_user.first_name))
+            request_contact(message)
 
 
 def request_contact(message):
@@ -78,7 +71,8 @@ def check_email(message):
 def get_email(message):
     user_dict['email'] = message.text
     bot.send_message(message.chat.id, 'Hi, {}'.format(user_dict['username']))
-    keyboard = telebot.types.ReplyKeyboardMarkup(one_time_keyboard=True)
+    keyboard = telebot.types.ReplyKeyboardMarkup(one_time_keyboard=True,
+                                                 resize_keyboard=True)
     keyboard.row('Agree', 'Disagree')
     msg = bot.send_message(message.chat.id, text='To use this bot you should share access to your google account',
                            reply_markup=keyboard)
@@ -100,7 +94,7 @@ def auth_google(message):
                                                     url=auth_url)
 
     keyboard.add(url_button)
-    bot.send_message(message.chat.id, 'Drive + Calendar', reply_markup=keyboard)
+    bot.send_message(message.chat.id, 'Drive', reply_markup=keyboard)
     # Make url button to Google authorization server
 
 
@@ -111,7 +105,11 @@ def get_credentials():                            # app get code which will exch
     else:
         auth_code = request.args.get('code')  # Exchange authorization code for access token
         credentials = flow.step2_exchange(auth_code)
-        a['credentials_json'] = OAuth2Credentials.to_json(credentials)
+        credentials_json = OAuth2Credentials.to_json(credentials)
+        user = Users(username=user_dict['username'], email_address=user_dict['email'], phone=user_dict['phone'],
+                     token=credentials_json)
+        session.add(user)
+        session.commit()
         response = 'We get your token'
     return response
 
@@ -122,7 +120,21 @@ def build_service(credentials_json, service_name):
     service = build(service_name, API_VERSION, http=http)  # Build a service object
     return service
 
+""" 
+--====Example of using drive.py module====--
+some_func()
+from drive import drive_search_file
+drive_service = build_service(a['credentials_json'], 'drive')
+drive_search_file(a['usrid'], drive_service)
+
+"""
 
 if __name__ == '__main__':
-    bot.polling()  # kill bot.polling() (Ctrl + C) after getting link in Telegram to start app.run()
-    app.run()      # using webhook it must work correctly
+    bot.polling()
+    app.run()
+    from drive import drive_search_file
+
+    for user in session.query(Users):
+        if user.username == 'Vlad':
+            drive_service = build_service(user.token, 'drive')
+            drive_search_file(333886641, drive_service)

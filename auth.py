@@ -1,19 +1,20 @@
 import httplib2
 import telebot   # pyTelegramBotAPI==2.3.1
+from datetime import datetime
 from sqlalchemy.orm import scoped_session, sessionmaker
 from oauth2client.client import flow_from_clientsecrets, OAuth2Credentials  # google-api-python-client==1.6.2
 from googleapiclient.discovery import build
 from config import TOKEN, CLIENT_SECRETS_FILE, REDIRECT_URI, API_VERSION
 from flask import Flask, request
 from models import engine, Users
+
 session = scoped_session(sessionmaker(bind=engine))
+session = session()
 
 app = Flask(__name__)
 bot = telebot.TeleBot(TOKEN)
 
-a = {}
 user_dict = {}
-
 scope = 'https://www.googleapis.com/auth/drive'
 # OAuth scope that need to request to access Google APIs
 flow = flow_from_clientsecrets(CLIENT_SECRETS_FILE,
@@ -27,13 +28,15 @@ flow.params['access_type'] = 'offline'
 
 @bot.message_handler(commands=['login'])  # Save user and take his google token
 def find_user(message):
-    for user in session.query(Users):
-        if user.username == message.from_user.first_name:  # !IMPORTANT! change this code for checking telegram id
-            bot.send_message(message.chat.id, text='You have already logged in'.format(user.username))
-        else:
-            bot.send_message(message.chat.id,
-                             text='Hi,{}. We need some information to contact you'.format(message.from_user.first_name))
-            request_contact(message)
+    user_dict['chat_id'] = str(message.chat.id)
+    for usr in session.query(Users):
+        if usr.chat_id == user_dict['chat_id']:
+            bot.send_message(message.chat.id, text='You have already logged in')
+            break
+    else:
+        bot.send_message(message.chat.id,
+                         text='Hi,{}. We need some information to contact you'.format(message.from_user.first_name))
+        request_contact(message)
 
 
 def request_contact(message):
@@ -106,10 +109,11 @@ def get_credentials():                            # app get code which will exch
         auth_code = request.args.get('code')  # Exchange authorization code for access token
         credentials = flow.step2_exchange(auth_code)
         credentials_json = OAuth2Credentials.to_json(credentials)
-        user = Users(username=user_dict['username'], email_address=user_dict['email'], phone=user_dict['phone'],
-                     token=credentials_json)
-        session.add(user)
+        simple_user = Users(username=user_dict['username'], email_address=user_dict['email'],
+                            token=credentials_json, chat_id=user_dict['chat_id'], created_on=datetime.now())
+        session.add(simple_user)
         session.commit()
+        bot.send_message(user_dict['chat_id'], 'Welcome! You are successfully registered ')
         response = 'We get your token'
     return response
 
@@ -120,21 +124,9 @@ def build_service(credentials_json, service_name):
     service = build(service_name, API_VERSION, http=http)  # Build a service object
     return service
 
-""" 
---====Example of using drive.py module====--
-some_func()
-from drive import drive_search_file
-drive_service = build_service(a['credentials_json'], 'drive')
-drive_search_file(a['usrid'], drive_service)
-
-"""
 
 if __name__ == '__main__':
     bot.polling()
     app.run()
-    from drive import drive_search_file
-
-    for user in session.query(Users):
-        if user.username == 'Vlad':
-            drive_service = build_service(user.token, 'drive')
-            drive_search_file(333886641, drive_service)
+    from drive import create_statistics
+    create_statistics(1)

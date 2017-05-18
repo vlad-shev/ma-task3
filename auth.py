@@ -1,22 +1,20 @@
 import httplib2
 import telebot   # pyTelegramBotAPI==2.3.1
-from datetime import datetime
-from sqlalchemy.orm import scoped_session, sessionmaker
 from oauth2client.client import flow_from_clientsecrets, OAuth2Credentials  # google-api-python-client==1.6.2
 from googleapiclient.discovery import build
+from validate_email import validate_email
 from config import TOKEN, CLIENT_SECRETS_FILE, REDIRECT_URI, API_VERSION
 from flask import Flask, request
-from models import engine, Users
+from models.base import open_base
+from models.users import User
 
-session = scoped_session(sessionmaker(bind=engine))
-session = session()
+session = open_base()
 
 app = Flask(__name__)
 bot = telebot.TeleBot(TOKEN)
 
 user_dict = {}
-scope = 'https://www.googleapis.com/auth/drive'
-# OAuth scope that need to request to access Google APIs
+scope = 'https://www.googleapis.com/auth/drive'  # OAuth scope that need to request to access Google APIs
 flow = flow_from_clientsecrets(CLIENT_SECRETS_FILE,
                                scope=scope,
                                redirect_uri=REDIRECT_URI)  # Make app client object.
@@ -26,45 +24,73 @@ flow.params['access_type'] = 'offline'
 #  and applying access tokens to HTTP requests.
 
 
-@bot.message_handler(commands=['login'])  # Save user and take his google token
+@bot.message_handler(commands=['drive'])
+def save_stat(message):
+    from drive import create_statistics
+    create_statistics(message.chat.id)
+
+
+@bot.message_handler(commands=['login'])  # Save user and get his google token
 def find_user(message):
-    user_dict['chat_id'] = str(message.chat.id)
-    for usr in session.query(Users):
-        if usr.chat_id == user_dict['chat_id']:
+    user_dict['telegram_id'] = message.chat.id
+    for usr in session.query(User):
+        if usr.telegram_id == user_dict['telegram_id']:
             bot.send_message(message.chat.id, text='You have already logged in')
             break
     else:
         bot.send_message(message.chat.id,
-                         text='Hi,{}. We need some information to contact you'.format(message.from_user.first_name))
-        request_contact(message)
+                         text='We need some information to contact you')
+        request_number_type(message)
 
 
-def request_contact(message):
-    msg = bot.send_message(message.chat.id, text='Please send your phone')
-    bot.register_next_step_handler(msg, check_phone)
+def request_number_type(message):
+    keyboard = telebot.types.ReplyKeyboardMarkup(one_time_keyboard=True,
+                                                 resize_keyboard=True)
+    keyboard.row('Telegram number', 'Another number')
+    msg = bot.send_message(message.chat.id, text='Please share your phone number',
+                           reply_markup=keyboard)
+    bot.register_next_step_handler(msg, check_number_type)
 
 
-def check_phone(message):
+def check_number_type(message):
+    if message.text == 'Telegram number':
+        keyboard = telebot.types.ReplyKeyboardMarkup(one_time_keyboard=True,
+                                                     resize_keyboard=True)
+        keyboard.add(telebot.types.KeyboardButton(text='Telegram number', request_contact=True))
+        msg = bot.send_message(message.chat.id, text='Send phone number from telegram', reply_markup=keyboard)
+        bot.register_next_step_handler(msg, get_contact)
+    elif message.text == 'Another number':
+        msg = bot.send_message(message.chat.id, text='Please, send new phone number in format 380XXXXXXXXX')
+        bot.register_next_step_handler(msg, check_number)
+
+
+def check_number(message):
     phone = message.text
-    if phone.isdigit() and (len(phone) == 12 or len(phone) == 10):
+    if phone.isdigit() and len(phone) == 12:
         get_contact(message)
+    elif phone[0] == '/':
+        bot.send_message(message.chat.id, text='Only commands can start with "/"')
     else:
         msg = bot.send_message(message.chat.id, text='Please send correct phone number')
-        bot.register_next_step_handler(msg, check_phone)
+        bot.register_next_step_handler(msg, check_number)
 
 
 def get_contact(message):
-    user_dict['telegram_id'] = int(message.from_user.id)
     user_dict['username'] = message.from_user.first_name
+    if message.contact:
+        user_dict['phone'] = int(message.contact.phone_number)
+        print(user_dict['phone'])
 
-    user_dict['phone'] = int(message.text)
+    else:
+        user_dict['phone'] = int(message.text)
     msg = bot.send_message(message.chat.id, text='Please send your email')
     bot.register_next_step_handler(msg, check_email)
 
 
 def check_email(message):
     email = message.text
-    if '@' in email:
+    is_valid = validate_email(email)
+    if is_valid:
         get_email(message)
     else:
         msg = bot.send_message(message.chat.id, text='Please send correct email')
@@ -109,11 +135,14 @@ def get_credentials():                            # app get code which will exch
         auth_code = request.args.get('code')  # Exchange authorization code for access token
         credentials = flow.step2_exchange(auth_code)
         credentials_json = OAuth2Credentials.to_json(credentials)
-        simple_user = Users(username=user_dict['username'], email_address=user_dict['email'],
-                            token=credentials_json, chat_id=user_dict['chat_id'], created_on=datetime.now())
+        simple_user = User(telegram_id=user_dict['telegram_id'],
+                           username=user_dict['username'],
+                           google_token=credentials_json,
+                           email=user_dict['email'],
+                           phone=user_dict['phone'])
         session.add(simple_user)
         session.commit()
-        bot.send_message(user_dict['chat_id'], 'Welcome! You are successfully registered ')
+        bot.send_message(user_dict['telegram_id'], 'Welcome! You are successfully logged in')
         response = 'We get your token'
     return response
 
@@ -128,5 +157,5 @@ def build_service(credentials_json, service_name):
 if __name__ == '__main__':
     bot.polling()
     app.run()
-    from drive import create_statistics
-    create_statistics(1)
+
+

@@ -1,33 +1,32 @@
 import telebot   # pyTelegramBotAPI==2.3.1
 from googleapiclient.http import MediaFileUpload
-from sqlalchemy.orm import scoped_session, sessionmaker
 from config import TOKEN
-from models import engine, Orders, Users
+from models.base import open_base
+from models.users import User
+from models.orders import Order
 
-session = scoped_session(sessionmaker(bind=engine))
-session = session()
+session = open_base()
 bot = telebot.TeleBot(TOKEN)
 
 
-def create_statistics(id_user):
+def create_statistics(telegram_id):
     stat_list = []
-    for order in session.query(Orders):
-        if order.id_user == id_user:
-            stat_list.append('Name:{} | Menu:{} | Address:{}  |  Price:{}  |  Date:{} \n\n'.format(
-                order.temp, order.menu, order.adress_city, order.total, order.data_time_city))
-            # temp change to username
-            text = ''.join(stat_list)
-
-    for user in session.query(Users):
-        if user.user_id == id_user:
-            credentials_json = user.token
-            from auth import build_service
-            drive_service = build_service(credentials_json, 'drive')
-            drive_search_file(text, drive_service, user.chat_id)
+    user = User.get_user(telegram_id)
+    order = Order.get_order(user.user_id)
 
 
-def drive_search_file(text, drive_service, chat_id):
-    filename = 'LunchBot{}.txt'.format(str(chat_id))
+    credentials_json = user.google_token
+    from auth import build_service
+    drive_service = build_service(credentials_json, 'drive')
+
+    stat_list.append('Name:{} | Menu:{} | Address:{} | Date:{} \n\n'.format(
+                     order.username, order.menu, order.address, order.created_on))
+    text = ''.join(stat_list)
+    drive_search_file(text, drive_service, user.telegram_id)
+
+
+def drive_search_file(text, drive_service, telegram_id):
+    filename = 'LunchBot{}.txt'.format(str(telegram_id))
     page_token = None
     while True:
         response = drive_service.files().list(q="mimeType='text/plain' and trashed=False",
